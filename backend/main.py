@@ -36,16 +36,18 @@ class Person(Base):
     luck = Column(Integer, default=15)
     level = Column(Integer, default=1)
 
-#class Achievement(Base):
- #   __tablename__ = "achievement"
 
-  #  id = Column(Integer, primary_key=True, index=True)
-   # user_id = Column(Integer, primary_key=True)
-    #chat_id = Column(Integer, primary_key=True)
-    #name = Column(String(100), nullable=False)
-   # description = Column(String(100), nullable=False)
-    #image = Column(String(255), default="default_achievement.jpg")
-    #condition = Column(String(50), nullable=False)
+class Achievement(Base):
+    __tablename__ = "achievement"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False)
+    chat_id = Column(Integer, nullable=False)
+    name = Column(String(100), nullable=False)
+    description = Column(String(255), nullable=False)
+    image = Column(String(255), default="default_achievement.jpg")
+    condition = Column(String(255), nullable=True)
+
 
 class Inventory(Base):
     __tablename__ = "inventory"
@@ -119,12 +121,11 @@ class AchievementCreate(BaseModel):
 
 class AchievementResponse(BaseModel):
     id: int
-    user_id: int
     name: str
-    image: str = "default_achievement.jpg"
+    photo: str
     condition: Optional[str] = None
-
-  
+    description: str
+    
     class Config:
         from_attributes = True
 
@@ -147,7 +148,6 @@ class InventoryAddRequest(BaseModel):
     quantity: int = 1
 
     
-
 class InventoryItemResponse(BaseModel):
     id: int
     item_id: int
@@ -156,7 +156,6 @@ class InventoryItemResponse(BaseModel):
     quantity: int
     class Config:
         from_attributes = True
-
 
 
 def get_db():
@@ -199,8 +198,8 @@ def create_player_alt(data: dict, db: Session = Depends(get_db)):
         user_id = data.get("user_id")
         chat_id= data.get("chat_id")
         name= data.get("name")
-        photo= data.get("photo")
-        level= data.get("level")
+        photo= data.get("photo", 'defaultl.jpg')
+        level= data.get("level", 1)
         if not all([user_id, chat_id, name]):
             raise HTTPException(status_code=400, detail="Missing reqired fields")
         
@@ -269,6 +268,22 @@ def get_get_all_players(db: Session = Depends(get_db)):
         for p in players
     ]
 
+@app.put("/api/person/update_level") #обновление уровня игрока
+def update_player_level(
+    chat_id: int,
+    user_id:int,
+    level: int,
+    #id чата и польз., уровень(пишем тип)
+    db: Session = Depends(get_db)
+):
+    player = get_person(chat_id, user_id, user_id, db)  # Вызываем вспомогательную функцию для поиска игрока
+    if not player:
+        raise HTTPException(status_code=404, detail="Игрок не найден")
+    
+    player.level = level
+    db.commit()
+    return {"message": "Уровень", "level": level}
+
 # Items (для магазина)
 @app.get("/api/item/all", response_model=List[ItemResponse])
 def get_items(db: Session = Depends(get_db)):
@@ -321,22 +336,61 @@ def add_to_inventory(request: InventoryAddRequest, db: Session = Depends(get_db)
     return {"message": "Предмет добавлен в инвентарь."}
 
 # Achievement
-#@app.get("/api/achievement/person/{chat_id}/{user_id}", response_model=List[AchievementResponse])
-#def get_user_achievements(chat_id: int, user_id: int, db: Session = Depends(get_db)):
- #   achievements = db.query(Achievement).filter(
-     #  Achievement.user_id == user_id,
-      # Achievement.chat_id == chat_id
-   # ).all()
-  #  return [
-    #    AchievementResponse(
- #       name = a.name,
-  #      description = a.description,
-   #     image = a.image,
-    #    condition = a.condition
-       # )
-        #for a in achievements
-    #]
+@app.get("/api/achievement/person/{chat_id}/{user_id}", response_model=List[AchievementResponse])
+def get_user_achievements(chat_id: int, user_id: int, db: Session = Depends(get_db)):
+    achievements = db.query(Achievement).filter(
+        Achievement.chat_id == chat_id,
+        Achievement.user_id == user_id
+    ).all()
+    return [
+        AchievementResponse(
+            id=a.id,
+            name=a.name,
+            photo=a.image,
+            condition=a.condition,
+            description=a.description
+        )
+        for a in achievements
+    ]
 
+@app.post("/api/achievement/create", status_code=201)
+def create_achievement(achievement: AchievementCreate, db: Session = Depends(get_db)):
+    db_achievement = Achievement(
+        user_id=achievement.user_id,
+        chat_id=achievement.chat_id,
+        name=achievement.name,
+        description=achievement.description,
+        image=achievement.image,
+        condition=achievement.condition
+    )
+    db.add(db_achievement)
+    db.commit()
+    return {"message": "Достижение выдано"}
+
+
+@app.post("/api/effects/apply") #применение эффекта
+def apply_effect(
+    # ID чата, польз., тип эффекта, величина эффекта, длительность в секундах(тип обозначаем)
+    user_id: int
+    chat_id: int
+    effect_type: str
+    value: int
+    duration_seconds: int
+    db: Session = Depends(get_db)
+):
+    effect = ActiveEffectDB(
+        user_id = user_id,
+        chat_id = chat_id,
+        effect = effect,
+        effect_type = effect_type,
+        value = value,
+        duration = duration,
+        db= db
+
+    )
+    db.add(effect)
+    db.commit()
+    return {"message": "примениен эффект"}
 
 
 
