@@ -157,6 +157,19 @@ class InventoryItemResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class EffectResponse(BaseModel):
+    effect_type: str
+    value: int
+    remaining_seconds: int
+    
+    class Config:
+        from_attributes = True
+
+class UseItemRequest(BaseModel):
+    user_id: int
+    chat_id: int
+    item_id: int
+
 
 def get_db():
     db = SessionLocal()
@@ -273,7 +286,6 @@ def update_player_level(
     chat_id: int,
     user_id:int,
     level: int,
-    #id чата и польз., уровень(пишем тип)
     db: Session = Depends(get_db)
 ):
     player = get_person(chat_id, user_id, user_id, db)  # Вызываем вспомогательную функцию для поиска игрока
@@ -283,6 +295,18 @@ def update_player_level(
     player.level = level
     db.commit()
     return {"message": "Уровень", "level": level}
+
+@app.get("/api/person/level/{chat_id}/{user_id}")
+def get_player_level(
+    chat_id: int,
+    user_id: int,
+    db: Session = Depends(get_db)
+):
+    player = get_person(db, chat_id, user_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="Игрок не найден")
+    
+    return {"level": player.level, "experience": player.experience}
 
 # Items (для магазина)
 @app.get("/api/item/all", response_model=List[ItemResponse])
@@ -367,7 +391,42 @@ def create_achievement(achievement: AchievementCreate, db: Session = Depends(get
     db.commit()
     return {"message": "Достижение выдано"}
 
+#Инвентарь
+@app.put("/api/inventory/update")
+def update_inventory_quantity(data: dict, db: Session = Depends(get_db)):
+    inventory_id = data.get('inventory_id')
+    quantity = data.get('quantity')
+    
+    item = db.query(Inventory).filter(Inventory.id == inventory_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Предмет не найден")
+    
+    item.quantity = quantity
+    db.commit()
+    return {"message": "Количество обновлено"}
 
+#Зелья
+@app.get("/api/effects/{chat_id}/{user_id}", response_model=List[EffectResponse])
+def get_active_effects(chat_id: int, user_id: int, db: Session = Depends(get_db)):
+    effects = db.query(ActiveEffectDB).filter(
+        ActiveEffectDB.chat_id == chat_id,
+        ActiveEffectDB.user_id == user_id
+    ).all()
+    
+    now = datetime.utcnow()
+    result = []
+    for e in effects:
+        elapsed = (now - e.started_at).total_seconds()
+        remaining = max(0, e.duration_seconds - elapsed)
+        if remaining > 0:
+            result.append(EffectResponse(
+                effect_type=e.effect_type,
+                value=e.value,
+                remaining_seconds=int(remaining)
+            ))
+    
+    return result
+    
 @app.post("/api/effects/apply") #применение эффекта
 def apply_effect(
     # ID чата, польз., тип эффекта, величина эффекта, длительность в секундах(тип обозначаем)
@@ -396,4 +455,4 @@ def apply_effect(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=800)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
