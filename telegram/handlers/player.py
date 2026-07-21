@@ -42,3 +42,27 @@ async def cmd_avatar(message: types.Message):
     else:
         # Если файл не найден, отправляем только текст
         await message.answer(text)
+
+@router.message(Command("achievement"))
+async def cmd_achievement(message: types.Message):
+    player = get_player_or_none(message)
+    if not player:
+        await message.answer("Сначала зарегистрируйтесь: /registration")
+        return
+    
+    achievements = api.get_user_achievements(message.chat.id, message.from_user.id)
+    
+    if not achievements:
+        await message.answer("Нет достижений")
+        return
+    
+    text = f"<b>Достижения {player.name}:</b>\n\n"
+    
+    for ach in achievements[0, 10]:
+        text += f"<b>{ach.name}</b>\n"
+
+    
+    if len(achievements) > 10:
+        text += f"\n... и еще {len(achievements) - 10} достижений"
+    
+    await message.answer(text)
