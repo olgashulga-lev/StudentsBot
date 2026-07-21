@@ -392,6 +392,17 @@ def create_achievement(achievement: AchievementCreate, db: Session = Depends(get
     return {"message": "Достижение выдано"}
 
 #Инвентарь
+@app.delete("/api/inventory/remove/{inventory_id}")
+def remove_inventory_item(Inventory_id: int, db: Session = Depends(get_db)):
+    item = db.query(Inventory).filter(
+        Inventory.id == Inventory_id
+    ).first()
+    if not item
+        raise HTTPException(status_code=404, detail="Предмет не найден")
+    db.delete(item)
+    db.commit()
+    return {"message": "Предмет удален"}
+
 @app.put("/api/inventory/update")
 def update_inventory_quantity(data: dict, db: Session = Depends(get_db)):
     inventory_id = data.get('inventory_id')
