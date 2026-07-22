@@ -177,7 +177,7 @@ async def start_raid(message: types.Message, boss_id: int):
           await message.answer("Нужно пройти регистрацию!")
           return
     all_bosses=api.get_bosses()
-    boss=next((b for b in bosses if b.id == boss_id), None)
+    boss=next((b for b in boss if b.id == boss_id), None)
     if not boss:
          await message.answer("Нет такого босса!")
          return
@@ -287,45 +287,228 @@ async def cmd_raid_status(message: types.Message):
              
         
 
-
-
-
-   
-
-
 @router.message(Command("leave_raid"))
 async def cmd_leave_raid(message: types.Message):
-    
+    for raid_id, raid in active_raids.items():
+        if message.from_user.id in raid['players']:
+            if raid['status'] != 'recruiting':
+                 await message.answer("Нельзя выйти из рейда во время битвы")
+                 return
+            raid['players'].remove(message.from_user.id)
+            creator=None
+            all_players=api.get_all_players()
+            for p in all_players:
+                 if p.user_id==raid['creator_id']:
+                      creator=p
+                      break
+            if creator:
+                 try:
+                      await message.bot.send_message(
+                           chat_id=creator.chat_id,
+                           text=f"Игрок покинул рейд осталось{len(raid['players'])}/5"
+                      )
+                 except:
+                      pass
+            if len(raid['players'])==0:
+                 del active_raids[raid_id]
+                 await message.answer("Рейд удален")
+                 return
+    await message.answer("Вы не учавствуете ни в одном рейде")
+
+                
+            
+            
+            
 
 @router.callback_query(F.data.startswith("start_raid_battle_"))
 async def cmd_raid_battle(callback: types.CallbackQuery):
+    raid_id = callback.data.replace("start_raid_battle_", "")
+    if raid_id not in active_raids:
+         await callback.answer("Рейд завершен")
+         return
+    raid=active_raids['raid_id']
+    if raid['status']!='recruiting':
+         await callback.answer("Рейд уже начался") 
+         return
+    if callback.from_user.id!=raid['creator_id']:
+         await callback.answer("Только создатель можнет создать рейд")
+         return
+    if len(raid['players'])<2:
+         await callback.answer("Для рейда нужно минимум 2 участника!")
+         return
+    raid['status']='fighting'
+
     
-        achievement_config = {
-            1: {"name": "", "desc": ""},
-            2: {"name": "", "desc": ""},
-            3: {"name": "", "desc": ""}
+    boss = next((b for b in api.get_bosses() if b.id == raid['boss_id']), None)
+    if not boss:
+         await callback.answer("Босс не найден")
+         return
+    await callback.answer('Битва начинается!')
+    all_players=api.get_all_players()
+
+    
+    for user_id in raid['players']:
+         try:
+              for p in all_players:
+                   if p.user_id == user_id:
+                        await callback.bot.send_message(
+                             chat_id=p.chat_id,
+                             text=f"Битва с {boss.name} начинается. Количество участников {len(raid['players'])}/5"
+                    
+
+                        )
+                        break
+         except:
+              pass
+    await callback.answer.edit_text("<b>Битва начилась!</b>\n\nРасcчет результатов...")
+    battle_result=await perform_raid_battle(raid,boss,callback)
+
+
+    
+        
+    
+    
+    
+    boss_hp = battle_result['boss_hp']
+    total_damage=battle_result['total_damage']
+    players_names=battle_result['players_names']
+    players_damage=battle_result['players_damage']
+    text=f"Битва с {boss.name}"
+    text+=f"Участники:{', '.join(players_names)}"
+
+
+    for i, name in enumerate(players_names):
+     if i < len(players_damage):
+          text+=f"{name}:{players_damage[i]}урона\n"   
+    text+=f"Общий урон:{total_damage}"
+
+    
+    if boss_hp <= 0:
+        reward_per_player=boss.money.reward//len(raid['players'])
+        exp_per_player=boss.exp.reward//len(raid['players'])
+        text+=f"Победа над боссом! Каждый игрок получает по {reward_per_player}золота и {exp_per_player}опыта"
+        for user_id in raid['players']:
+             for p in all_players:
+                  if p.user_id==user_id:
+                     player=api.get_player(p.chat_id,user_id)
+                     if player:
+                          player.wins+=1
+                          api.update_player(player)
+                     break
+        achievement=[]
+        achievement_config={
+             1:{"name":"Убийца Большой жабы", "desc": "Вы победили Большую Жабу в рейде!"},
+             2:{"name":"Победитель Орка", "desc": "Вы победили Орка в рейде!"},
+             3:{"name":"Сокрушитель Дракона", "desc": "Вы победили Дракона в рейде!"}
         }
 
+        for user_id in raid['players']:
+            for p in all_players:
+                if p.user_id == user_id:
+                    existing=api.get_user_achievements(p.chat_id,user_id)
+                    has_achievement = any(a.name == achievement_config[boss.id]['name'] for a in existing)
+                
+                    if not has_achievement and boss.id in achievement_config:
+                        result = api.give_achievement(
+                            chat_id=p.chat_id,
+                            user_id=user_id,
+                            name=achievement_config[boss.id]['name'],
+                            description=achievement_config[boss.id]['desc'],
+                            condition=f"Победа над боссом {boss.name}"
+                        )
+                        if result:
+                            achievement_messages.append(f"{p.name} получил достижение '{achievement_config[boss.id]['name']}'!")
+                    break
+        level_up_messages=[]
+        for user_id in raid['players']:
+             for p in all_players:
+                  if p.user_id==user_id:
+                     player=api.get_player(p.chat_id,user_id)
+                     if player:
+                          player.money+=reward_per_player
+                          leveld=player.add_exp(exp_per_player)
+                          api.update_player(player)
+                          if leveld:
+                               level_up_messages.append(f"{player.name} повысил уровень, достигнув {player.lvl} уровня")
+                     break
+     
+    
+        if level_up_messages:
+            text += "\n\n" + "\n".join(level_up_messages)
         
+        for user_id in raid['players']:
+             try:
+                  for p in all_players:
+                    if p.user_id==user_id:
+                         await callback.bot.send_message(
+                              chat_id=p.chat_id
+                              text=f"Вы победили в рейде!{text}"
+
+                         )
+                         break
+             except Exception as e:
+                  print("Ошибка")
+        del active_raids[raid_id]
+                       
+                  
+            
+        
+        
+        
+    else:
+        text+=f"<b>Поражение!</b>\n\n У босса осталось {boss_hp} HP"
+        raid['boss_current_hp']=boss_hp
+        raid['status']='recruiting'
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="Начать бой снова",
+                        callback_data=f"start_raid_battle_{raid_id}"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="Отменить рейд",
+                        callback_data=f"cancel_raid_{raid_id}"
+                    )
+                ]
+            ]
+        )
+        
+        for user_id in raid['players']:
+             try:
+                  for p in all_players:
+                    if p.user_id==user_id:
+                         if user_id==raid['creator_id']:
+                              await callback.bot.send_message(
+                                   chat_id=p.cyat_id,
+                                   text=text,
+                                   reply_warkup=keyboard
+                              )
+                         else:
+                              await callback.bot.send_message(
+                                   chat_id=p.cyat_id,
+                                   text=text,
+                               )
+                         break
+             except Exception as e:
+                  print(f"ошибка отправки результата игроку{user_id}: {e}")
+        await callback.message.edit_text(text,reply_warkup=keyboard)       
+    await callback.answer( " бой завершен")  
+
+ 
+            
+      
+    
+    
 
 @router.callback_query(F.data.startswith("cancel_raid_"))
 async def cmd_cancel_raid(callback: types.CallbackQuery):
-   
-async def check_and_give_boss_achievements(boss_id, user_id, chat_id, bot):
-    achievement_config = {
-        1: {
-            'name': "",
-            'description': ""
-        },
-        2: {
-            'name': "",
-            'description': ""
-        },
-        3: {
-            'name': "",
-            'description': ""
-        }
-    }
+    raid_id = callback.data.replace("cancel_raid_", "")
     
     
-    await callback.message.edit_text("Рейд отменён")
+    
+    
+    for  raid['']:
+        
