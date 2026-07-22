@@ -497,18 +497,29 @@ async def cmd_raid_battle(callback: types.CallbackQuery):
         await callback.message.edit_text(text,reply_warkup=keyboard)       
     await callback.answer( " бой завершен")  
 
- 
-            
-      
-    
-    
 
 @router.callback_query(F.data.startswith("cancel_raid_"))
 async def cmd_cancel_raid(callback: types.CallbackQuery):
     raid_id = callback.data.replace("cancel_raid_", "")
+    if raid_id not in active_raids:
+         await callback.answer('рейд завершен')
+         return
+    raid= active_raids[raid_id]
+    if callback.from_user.id!=raid['creator_id']:
+         await callback.answer('только создатель может отменить рейд')
+         return
+    all_players=api.get_all_players()
+    for user_id in raid['players']:
+         if user_id!=callback.from_user.id:
+             try:
+                    for p in all_players:
+                      if p.user_id==user_id:
+                           await callback.bot.send_message(chat_id=p.chat_id,
+                                                           text=f'рейд был отменен создателем')
+                           break
+             except:
+                  pass
+      
     
     
-    
-    
-    for  raid['']:
-        
+
