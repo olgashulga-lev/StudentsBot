@@ -1,0 +1,44 @@
+import random
+from aiogram import Router, types
+from aiogram.filters import Command
+
+import api
+from .common_utils import get_player_or_none
+
+router = Router()
+
+@router.message(Command("dice"))
+async def cmd_dice(message: types.Message):
+    player = get_player_or_none(message)#получает игрока из базы
+    if not player:#? нет игрока
+        await message.answer("Вы не зарегестрированы. /registration")
+        return
+    
+    bet = 10 #ставка
+    if player.money<bet:# денег игрока меньше чем ставка
+        await message.answer(f"Надо: {bet}, у вас есть: {player.money}")
+        return
+    
+    player_dice = random.randint(1,6)
+    bot_dice = random.randint(1,6)
+    
+    text = f"""
+<b>Игра в кости</b>
+Ставка 10 монет
+ваш бросок: {player_dice}
+бросок бота: {bot_dice}
+    """
+    
+    if player_dice > bot_dice:
+        win = bet * 2
+        player.money += win
+        api.update_player(player)
+        text += f"\n<b>Вы победили!</b> +{win} монет!"
+    elif bot_dice > player_dice:
+        player.money -= bet
+        api.update_player(player)
+        text += f"\n<b>Вы проиграли!</b> -{bet} монет!"
+    else:
+        text += "\n<b>Ничья!</b> Ставка возвращена."
+    
+    await message.answer(text)
